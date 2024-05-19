@@ -74,16 +74,10 @@ int main() {
 
   buffer[recieved_buff] = '\0';
 
-  printf("This is the buffer we have recieved: \n%s\n", buffer);
-
   char *parse = strtok(buffer, "\n");
-
   char* request = strtok(parse, " ");
 
   request = strtok(NULL, " ");
-
-  printf("This is the buffer bytes we have recieved: %zd \n", recieved_buff);
-  printf("This is the request: %s \n", request);
 
   char *empty_response = response(request);
   send(client_socket_fd, empty_response, strlen(empty_response), 0);
@@ -93,10 +87,7 @@ int main() {
 }
 
 char *response(char* request_target) {
-    if(strcmp(request_target, "/") == 0){ 
-        printf("this is the request target %s\n", request_target);
-        return "HTTP/1.1 200 OK\r\n\r\n";  
-    }
+    if(strcmp(request_target, "/") == 0){ return "HTTP/1.1 200 OK\r\n\r\n";  }
     else { return "HTTP/1.1 404 Not Found\r\n\r\n"; }
     
 }
