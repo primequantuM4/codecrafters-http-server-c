@@ -7,7 +7,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-char* response();
+#define BUFFER_SIZE 4096
+char *response();
 int main() {
   // Disable output buffering
   setbuf(stdout, NULL);
@@ -56,15 +57,46 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_socket_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+  int client_socket_fd =
+      accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
   printf("Client connected\n");
-  char* empty_response = response();
-  send(client_socket_fd, empty_response, strlen(empty_response), 0); 
+
+  char buffer[BUFFER_SIZE];
+  size_t recieved_buff = recv(client_socket_fd, buffer, sizeof(buffer) - 1, 0);
+
+  if (recieved_buff < 0) {
+    printf("Recieved Error while parsing client request Error: %s \n",
+           strerror(errno));
+    close(server_fd);
+    close(client_socket_fd);
+    return 1;
+  }
+
+  buffer[recieved_buff] = '\0';
+
+  printf("This is the buffer we have recieved: \n%s\n", buffer);
+
+  char *parse = strtok(buffer, "\n");
+
+  char* request = strtok(parse, " ");
+
+  request = strtok(NULL, " ");
+
+  printf("This is the buffer bytes we have recieved: %zd \n", recieved_buff);
+  printf("This is the request: %s \n", request);
+
+  char *empty_response = response(request);
+  send(client_socket_fd, empty_response, strlen(empty_response), 0);
   close(server_fd);
 
   return 0;
 }
 
-char* response(){
-	return "HTTP/1.1 200 OK\r\n\r\n";
+char *response(char* request_target) {
+    if(strcmp(request_target, "/") == 0){ 
+        printf("this is the request target %s\n", request_target);
+        return "HTTP/1.1 200 OK\r\n\r\n";  
+    }
+    else { return "HTTP/1.1 404 Not Found\r\n\r\n"; }
+    
 }
