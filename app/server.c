@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+char* response();
 int main() {
   // Disable output buffering
   setbuf(stdout, NULL);
@@ -55,10 +56,15 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+  int client_socket_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
   printf("Client connected\n");
-
+  char* empty_response = response();
+  send(client_socket_fd, empty_response, strlen(empty_response), 0); 
   close(server_fd);
 
   return 0;
+}
+
+char* response(){
+	return "HTTP/1.1 200 OK\r\n\r\n";
 }
