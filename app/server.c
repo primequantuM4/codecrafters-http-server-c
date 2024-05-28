@@ -10,9 +10,12 @@
 #define BUFFER_SIZE 4096
 
 char *response(char *request_target);
-char *echo_response(char *request_target);
+char *echo_response(char *buff);
 
 char **split_tokens(char *buff);
+char *send_response(char buffer[]);
+char *html_content(char *message);
+char *copy_str(char str[]);
 
 int main() {
   // Disable output buffering
@@ -79,17 +82,24 @@ int main() {
 
   buffer[recieved_buff] = '\0';
 
-  char *parse = strtok(buffer, "\n");
-  // char* request = strtok(parse, " ");
-
-  // request = strtok(NULL, " ");
-  char *echo_res = echo_response(parse);
-
-  // char *empty_response = response(request);
-  send(client_socket_fd, echo_res, strlen(echo_res), 0);
+  char *res = send_response(buffer);
+  send(client_socket_fd, res, strlen(res), 0);
   close(server_fd);
 
   return 0;
+}
+
+char *copy_str(char str[]){
+    size_t len = strlen(str);
+    char *copy_arr = malloc(len + 1);
+
+    if (copy_arr == NULL) {
+        perror("Failed to allocate memory");
+        exit(EXIT_FAILURE);
+    }
+
+    strcpy(copy_arr, str);
+    return copy_arr;
 }
 
 char *response(char *request_target) {
@@ -100,8 +110,29 @@ char *response(char *request_target) {
   }
 }
 
-char *echo_response(char *request_target) {
-  char **split_buff = split_tokens(request_target);
+char *send_response(char buffer[]){
+    char *buffer_cpy = copy_str(buffer);
+    const char *user_agent = "/user-agent";
+
+    char *request_line = strtok(buffer, "\r\n");
+    char *host_line = strtok(NULL, "\r\n");
+    char *user_agent_line = (host_line != NULL) ? strtok(NULL, "\r\n") : NULL;
+
+    char *request_target = strtok(request_line, " ");
+    request_target = strtok(NULL, " ");
+
+    if(strcmp(request_target, user_agent) != 0) { return echo_response(buffer_cpy); } 
+
+    char *user_agents = strtok(user_agent_line, ": ");
+    user_agents = strtok(NULL, ": ");
+
+    return html_content(user_agents);
+
+    
+}
+char *echo_response(char *buff) {
+
+  char **split_buff = split_tokens(buff);
   const char *slash = "/";
   const char *echo = "echo";
 
@@ -110,32 +141,39 @@ char *echo_response(char *request_target) {
 
   char *echo_word = strtok(split_buff[1], "/");
   if (strcmp(echo_word, echo) != 0) {
-    printf("I have reached here\n");
     return response(split_buff[1]);
   }
 
   echo_word = strtok(NULL, "/");
+  if (echo_word == NULL) {
+    return response("/Not Found");
+  }
+    
+  return html_content(echo_word);
+}
 
-  int content_length = strlen(echo_word);
+char *html_content(char *message){
+    int content_length = strlen(message);
   int buffer_size = snprintf(NULL, 0,
                              "HTTP/1.1 200 OK\r\nContent-Type: "
                              "text/plain\r\nContent-Length: %d\r\n\r\n%s",
-                             content_length, echo_word);
+                             content_length, message);
 
   char *buffer = malloc(buffer_size + 1);
-
   sprintf(buffer,
           "HTTP/1.1 200 OK\r\n"
           "Content-Type: text/plain\r\n"
           "Content-Length: %d\r\n\r\n%s",
-          content_length, echo_word);
+          content_length, message);
 
   return buffer;
 }
-
-char **split_tokens(char *request_target) {
+char **split_tokens(char *buff) {
+  char *request_target;
+  const char delim[] = "\r\n";
+  request_target = strtok(buff, delim);
   int index = 0;
-  for (int i = 0; i < strlen(request_target); i++) {
+  for (int i = 0; request_target[i] != '\0'; i++) {
     if (request_target[i] == ' ') {
       index++;
     }
@@ -151,7 +189,6 @@ char **split_tokens(char *request_target) {
   for (int i = 0; i < index; i++) {
     buff_arr[i] = malloc(strlen(token) + 1);
     strcpy(buff_arr[i], token);
-    printf("This is the current token at [%d]: %s\n", i, buff_arr[i]);
     token = strtok(NULL, " ");
   }
 
