@@ -3,6 +3,7 @@
 #include <netinet/ip.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -16,6 +17,13 @@ char **split_tokens(char *buff);
 char *send_response(char buffer[]);
 char *html_content(char *message);
 char *copy_str(char str[]);
+
+void *send_response_wrapper(void *args);
+
+typedef struct thread_args {
+    int client_socket_fd;
+    char buffer[BUFFER_SIZE];
+}THREAD_ARGS;
 
 int main() {
   // Disable output buffering
@@ -65,30 +73,59 @@ int main() {
   printf("Waiting for a client to connect...\n");
   client_addr_len = sizeof(client_addr);
 
-  int client_socket_fd =
-      accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-  printf("Client connected\n");
+  pthread_t tid;
+  while (1) {
+      int client_socket_fd =
+          accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
+      printf("Client connected\n");
 
-  char buffer[BUFFER_SIZE];
-  size_t recieved_buff = recv(client_socket_fd, buffer, sizeof(buffer) - 1, 0);
+      if (client_socket_fd < 0) { break; }
+      char buffer[BUFFER_SIZE];
+      size_t recieved_buff = recv(client_socket_fd, buffer, sizeof(buffer) - 1, 0);
 
-  if (recieved_buff < 0) {
-    printf("Recieved Error while parsing client request Error: %s \n",
-           strerror(errno));
-    close(server_fd);
-    close(client_socket_fd);
-    return 1;
+      if (recieved_buff < 0) {
+          printf("Recieved Error while parsing client request Error: %s \n",
+                  strerror(errno));
+          close(server_fd);
+          close(client_socket_fd);
+          return 1;
+      }
+
+      buffer[recieved_buff] = '\0';
+
+      THREAD_ARGS *args = malloc(sizeof(THREAD_ARGS));
+      args->client_socket_fd = client_socket_fd;
+      strncpy(args->buffer, buffer, BUFFER_SIZE);
+
+      int result = pthread_create(&tid, NULL, send_response_wrapper, (void *) args);
+
+      if(result != 0) {
+          perror("Thread creation failed");
+          free(args);
+          exit(EXIT_FAILURE);
+      }
+
+      pthread_detach(tid);
+      
   }
-
-  buffer[recieved_buff] = '\0';
-
-  char *res = send_response(buffer);
-  send(client_socket_fd, res, strlen(res), 0);
   close(server_fd);
 
   return 0;
 }
 
+void *send_response_wrapper(void *arg){
+    THREAD_ARGS *args = (THREAD_ARGS *)arg; 
+    int client_socket_fd = args->client_socket_fd;
+    char* buffer = args->buffer;
+
+    char *res = send_response(buffer);
+    send(client_socket_fd, res, strlen(res), 0);
+
+    free(args);
+
+    close(client_socket_fd);
+
+}
 char *copy_str(char str[]){
     size_t len = strlen(str);
     char *copy_arr = malloc(len + 1);
