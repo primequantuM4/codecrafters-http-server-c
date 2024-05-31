@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <ctype.h>
 
 #define BUFFER_SIZE 4096
 
@@ -225,6 +226,15 @@ char *echo_response(char *buff, char* directory) {
 
       
   }
+
+  char *encoding = strtok(request_buffer, "\r\n"); 
+  printf("This is the encoding %s\n", encoding);
+  encoding = strtok(NULL, "\r\n");
+  printf("This is the encoding %s\n", encoding);
+  encoding = strtok(NULL, "\r\n");
+  printf("This is the encoding %s\n", encoding);
+  encoding = strtok(NULL, "\r\n");
+  printf("This is the encoding %s\n", encoding);
     
   printf("this is the word_command%s", word_command);
   return html_content(word, "text/plain");
