@@ -17,6 +17,8 @@ char **split_tokens(char *buff);
 char *send_response(char buffer[], char* directory);
 char *html_content(char *message, char *content_type);
 char *copy_str(char str[]);
+char *get_file(char* file_path);
+char *post_file(char* file_path, char* buffer_content);
 
 void *send_response_wrapper(void *args);
 
@@ -172,11 +174,16 @@ char *send_response(char buffer[], char* directory){
 }
 char *echo_response(char *buff, char* directory) {
 
+  char *request_buffer = copy_str(buff);
   char **split_buff = split_tokens(buff);
   const char *slash = "/";
+  const char *empty = "";
+
   const char *echo = "echo";
   const char *file = "files";
-  const char *empty = "";
+
+  const char *http_get = "GET";
+  const char *http_post = "POST";
 
   if (strcmp(split_buff[1], slash) == 0)
     return response(split_buff[1]);
@@ -196,22 +203,27 @@ char *echo_response(char *buff, char* directory) {
 
   int result = strcmp(word_command, file);
   if(strcmp(directory, empty) != 0) {
-      printf(" I have arrived here right? ");
-      size_t length = strlen(directory) + strlen(word) + 1;
 
+      size_t length = strlen(directory) + strlen(word) + 1;
       char *file_path = malloc(length);
       strcpy(file_path, directory);
       strcat(file_path, word);
+
+      if(strcmp(http_get, split_buff[0]) == 0) {
+          return get_file(file_path);
+      }
       
-    FILE *fh_input;
-    fh_input = fopen(file_path, "r");
+      char *body_buff = strtok(request_buffer, "\r\n");
+      body_buff = strtok(NULL, "\r\n");
+      printf("This is the body buffer %s\n", body_buff);
+      body_buff = strtok(NULL, "\r\n");
+      printf("This is the body buffer %s\n", body_buff);
+      body_buff = strtok(NULL, "\r\n");
+      printf("This is the body buffer %s\n", body_buff);
 
-    if(fh_input == NULL) { return response("/Not Found");}
+      return post_file(file_path, body_buff);
 
-    char file_buffer[BUFFER_SIZE];
-    fgets(file_buffer, BUFFER_SIZE, fh_input);
-
-    return html_content(file_buffer, "application/octet-stream");
+      
   }
     
   printf("this is the word_command%s", word_command);
@@ -259,4 +271,33 @@ char **split_tokens(char *buff) {
   }
 
   return buff_arr;
+}
+
+char *get_file(char* file_path) {
+    FILE *fh_input;
+    fh_input = fopen(file_path, "r");
+
+    if(fh_input == NULL) { return response("/Not Found");}
+
+    char file_buffer[BUFFER_SIZE];
+    fgets(file_buffer, BUFFER_SIZE, fh_input);
+
+    fclose(fh_input);
+
+    return html_content(file_buffer, "application/octet-stream");
+}
+
+char *post_file(char *file_path, char* buffer_contents) {
+    FILE *fh_output;
+    fh_output = fopen(file_path, "w");
+
+    if(fh_output == NULL) {
+        perror("Cannot open file");
+        return NULL;
+    }
+    fprintf(fh_output, "%s", buffer_contents);
+    fclose(fh_output);
+
+    return "HTTP/1.1 201 Created\r\n\r\n";
+
 }
