@@ -231,10 +231,8 @@ char *echo_response(char *buff, char* directory) {
   char *encoding = strtok(request_buffer, "\r\n"); 
   encoding = strtok(NULL, "\r\n");
 
-  printf("This is the encoding %s\n", encoding);
   encoding = strtok(NULL, ": ");
-  encoding = strtok(NULL, ": ");
-  printf("This is the encoding %s\n", encoding);
+  encoding = strtok(NULL, "\0");
 
   if (encoding == NULL || strstr(encoding, gzip) == NULL) {
     encoding = "other";
