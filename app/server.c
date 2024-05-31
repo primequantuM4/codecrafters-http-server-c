@@ -11,11 +11,11 @@
 #define BUFFER_SIZE 4096
 
 char *response(char *request_target);
-char *echo_response(char *buff);
+char *echo_response(char *buff, char* directory);
 
 char **split_tokens(char *buff);
-char *send_response(char buffer[]);
-char *html_content(char *message);
+char *send_response(char buffer[], char* directory);
+char *html_content(char *message, char *content_type);
 char *copy_str(char str[]);
 
 void *send_response_wrapper(void *args);
@@ -23,18 +23,15 @@ void *send_response_wrapper(void *args);
 typedef struct thread_args {
     int client_socket_fd;
     char buffer[BUFFER_SIZE];
+    char *directory;
 }THREAD_ARGS;
 
-int main() {
+int main(int argc, char **argv) {
   // Disable output buffering
   setbuf(stdout, NULL);
 
-  // You can use print statements as follows for debugging, they'll be visible
-  // when running tests.
   printf("Logs from your program will appear here!\n");
 
-  // Uncomment this block to pass the first stage
-  //
   int server_fd, client_addr_len;
   struct sockaddr_in client_addr;
 
@@ -96,6 +93,7 @@ int main() {
       THREAD_ARGS *args = malloc(sizeof(THREAD_ARGS));
       args->client_socket_fd = client_socket_fd;
       strncpy(args->buffer, buffer, BUFFER_SIZE);
+      args->directory = argc > 1 ? argv[2] : "";
 
       int result = pthread_create(&tid, NULL, send_response_wrapper, (void *) args);
 
@@ -117,8 +115,11 @@ void *send_response_wrapper(void *arg){
     THREAD_ARGS *args = (THREAD_ARGS *)arg; 
     int client_socket_fd = args->client_socket_fd;
     char* buffer = args->buffer;
+    char *directory = args->directory;
 
-    char *res = send_response(buffer);
+    printf("Directory is %s\n", directory);
+
+    char *res = send_response(buffer, directory);
     send(client_socket_fd, res, strlen(res), 0);
 
     free(args);
@@ -140,14 +141,16 @@ char *copy_str(char str[]){
 }
 
 char *response(char *request_target) {
+    printf("what is my request target? %s\n", request_target);
   if (strcmp(request_target, "/") == 0) {
     return "HTTP/1.1 200 OK\r\n\r\n";
-  } else {
+  }
+  else {
     return "HTTP/1.1 404 Not Found\r\n\r\n";
   }
 }
 
-char *send_response(char buffer[]){
+char *send_response(char buffer[], char* directory){
     char *buffer_cpy = copy_str(buffer);
     const char *user_agent = "/user-agent";
 
@@ -158,50 +161,76 @@ char *send_response(char buffer[]){
     char *request_target = strtok(request_line, " ");
     request_target = strtok(NULL, " ");
 
-    if(strcmp(request_target, user_agent) != 0) { return echo_response(buffer_cpy); } 
+    if(strcmp(request_target, user_agent) != 0) { return echo_response(buffer_cpy, directory); } 
 
     char *user_agents = strtok(user_agent_line, ": ");
     user_agents = strtok(NULL, ": ");
 
-    return html_content(user_agents);
+    return html_content(user_agents, "text/plain");
 
     
 }
-char *echo_response(char *buff) {
+char *echo_response(char *buff, char* directory) {
 
   char **split_buff = split_tokens(buff);
   const char *slash = "/";
   const char *echo = "echo";
+  const char *file = "files";
+  const char *empty = "";
 
   if (strcmp(split_buff[1], slash) == 0)
     return response(split_buff[1]);
 
-  char *echo_word = strtok(split_buff[1], "/");
-  if (strcmp(echo_word, echo) != 0) {
-    return response(split_buff[1]);
+  char *word = strtok(split_buff[1], "/");
+  char *word_command =  malloc(strlen(word) + 1);
+  strncpy(word_command, word, strlen(word));
+
+  if (strcmp(word, echo) != 0 && strcmp(word, file) != 0) {
+    return response(word);
   }
 
-  echo_word = strtok(NULL, "/");
-  if (echo_word == NULL) {
+  word = strtok(NULL, "\0");
+  if (word == NULL) {
     return response("/Not Found");
   }
+
+  int result = strcmp(word_command, file);
+  if(strcmp(directory, empty) != 0) {
+      printf(" I have arrived here right? ");
+      size_t length = strlen(directory) + strlen(word) + 1;
+
+      char *file_path = malloc(length);
+      strcpy(file_path, directory);
+      strcat(file_path, word);
+      
+    FILE *fh_input;
+    fh_input = fopen(file_path, "r");
+
+    if(fh_input == NULL) { return response("/Not Found");}
+
+    char file_buffer[BUFFER_SIZE];
+    fgets(file_buffer, BUFFER_SIZE, fh_input);
+
+    return html_content(file_buffer, "application/octet-stream");
+  }
     
-  return html_content(echo_word);
+  printf("this is the word_command%s", word_command);
+  return html_content(word, "text/plain");
 }
 
-char *html_content(char *message){
+char *html_content(char *message, char* content_type){
     int content_length = strlen(message);
   int buffer_size = snprintf(NULL, 0,
                              "HTTP/1.1 200 OK\r\nContent-Type: "
-                             "text/plain\r\nContent-Length: %d\r\n\r\n%s",
-                             content_length, message);
+                             "%s\r\nContent-Length: %d\r\n\r\n%s",
+                             content_type, content_length, message);
 
   char *buffer = malloc(buffer_size + 1);
   sprintf(buffer,
           "HTTP/1.1 200 OK\r\n"
-          "Content-Type: text/plain\r\n"
+          "Content-Type: %s\r\n"
           "Content-Length: %d\r\n\r\n%s",
-          content_length, message);
+          content_type, content_length, message);
 
   return buffer;
 }
