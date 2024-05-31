@@ -16,7 +16,7 @@ char *echo_response(char *buff, char* directory);
 
 char **split_tokens(char *buff);
 char *send_response(char buffer[], char* directory);
-char *html_content(char *message, char *content_type);
+char *html_content(char *message, char *content_type, char* encoding);
 char *copy_str(char str[]);
 char *get_file(char* file_path);
 char *post_file(char* file_path, char* buffer_content);
@@ -169,7 +169,7 @@ char *send_response(char buffer[], char* directory){
     char *user_agents = strtok(user_agent_line, ": ");
     user_agents = strtok(NULL, ": ");
 
-    return html_content(user_agents, "text/plain");
+    return html_content(user_agents, "text/plain", "other");
 
     
 }
@@ -228,31 +228,36 @@ char *echo_response(char *buff, char* directory) {
   }
 
   char *encoding = strtok(request_buffer, "\r\n"); 
-  printf("This is the encoding %s\n", encoding);
   encoding = strtok(NULL, "\r\n");
+
   printf("This is the encoding %s\n", encoding);
-  encoding = strtok(NULL, "\r\n");
+  encoding = strtok(NULL, ": ");
+  encoding = strtok(NULL, ": ");
   printf("This is the encoding %s\n", encoding);
-  encoding = strtok(NULL, "\r\n");
-  printf("This is the encoding %s\n", encoding);
+
+  if (encoding == NULL) {
+    encoding = "other";
+  }
     
-  printf("this is the word_command%s", word_command);
-  return html_content(word, "text/plain");
+  return html_content(word, "text/plain", encoding);
 }
 
-char *html_content(char *message, char* content_type){
+char *html_content(char *message, char* content_type, char* encoding){
+    const char *gzip = "gzip";
+    char *encoder = (strstr(encoding,gzip) != NULL) ? "Content-Encoding: gzip\r\n": "";
     int content_length = strlen(message);
   int buffer_size = snprintf(NULL, 0,
-                             "HTTP/1.1 200 OK\r\nContent-Type: "
+                             "HTTP/1.1 200 OK\r\n"
+                             "%sContent-Type: "
                              "%s\r\nContent-Length: %d\r\n\r\n%s",
-                             content_type, content_length, message);
+                             encoder,content_type, content_length, message);
 
   char *buffer = malloc(buffer_size + 1);
   sprintf(buffer,
           "HTTP/1.1 200 OK\r\n"
-          "Content-Type: %s\r\n"
+          "%sContent-Type: %s\r\n"
           "Content-Length: %d\r\n\r\n%s",
-          content_type, content_length, message);
+          encoder,content_type, content_length, message);
 
   return buffer;
 }
@@ -294,7 +299,7 @@ char *get_file(char* file_path) {
 
     fclose(fh_input);
 
-    return html_content(file_buffer, "application/octet-stream");
+    return html_content(file_buffer, "application/octet-stream", "other");
 }
 
 char *post_file(char *file_path, char* buffer_contents) {
