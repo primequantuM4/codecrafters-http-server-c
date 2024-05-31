@@ -182,6 +182,7 @@ char *echo_response(char *buff, char* directory) {
 
   const char *echo = "echo";
   const char *file = "files";
+  const char *gzip = "gzip";
 
   const char *http_get = "GET";
   const char *http_post = "POST";
@@ -235,7 +236,7 @@ char *echo_response(char *buff, char* directory) {
   encoding = strtok(NULL, ": ");
   printf("This is the encoding %s\n", encoding);
 
-  if (encoding == NULL) {
+  if (encoding == NULL || strstr(encoding, gzip) == NULL) {
     encoding = "other";
   }
     
