@@ -1,317 +1,246 @@
 #include <errno.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <pthread.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
-#include <ctype.h>
-
-#define BUFFER_SIZE 4096
-
-char *response(char *request_target);
-char *echo_response(char *buff, char* directory);
-
-char **split_tokens(char *buff);
-char *send_response(char buffer[], char* directory);
-char *html_content(char *message, char *content_type, char* encoding);
-char *copy_str(char str[]);
-char *get_file(char* file_path);
-char *post_file(char* file_path, char* buffer_content);
-
-void *send_response_wrapper(void *args);
-
-typedef struct thread_args {
-    int client_socket_fd;
-    char buffer[BUFFER_SIZE];
-    char *directory;
-}THREAD_ARGS;
-
+#include <zlib.h>
+char *directory = NULL;
+void *http_handler(void *args);
 int main(int argc, char **argv) {
   // Disable output buffering
   setbuf(stdout, NULL);
-
-  printf("Logs from your program will appear here!\n");
-
-  int server_fd, client_addr_len;
+  if (argc >= 2 &&
+      strncmp(argv[1], "--directory", strlen("--directory")) == 0) {
+    directory = argv[2];
+  }
+  int server_socket, client_addr_len;
   struct sockaddr_in client_addr;
-
-  server_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (server_fd == -1) {
+  pthread_t tid;
+  server_socket = socket(AF_INET, SOCK_STREAM, 0);
+  if (server_socket == -1) {
     printf("Socket creation failed: %s...\n", strerror(errno));
     return 1;
   }
-
-  // Since the tester restarts your program quite often, setting REUSE_PORT
-  // ensures that we don't run into 'Address already in use' errors
+  // // Since the tester restarts your program quite often, setting REUSE_PORT
+  // // ensures that we don't run into 'Address already in use' errors
   int reuse = 1;
-  if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEPORT, &reuse, sizeof(reuse)) <
-      0) {
+  if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &reuse,
+                 sizeof(reuse)) < 0) {
     printf("SO_REUSEPORT failed: %s \n", strerror(errno));
     return 1;
   }
-
-  struct sockaddr_in serv_addr = {
+  struct sockaddr_in server_addr = {
       .sin_family = AF_INET,
       .sin_port = htons(4221),
       .sin_addr = {htonl(INADDR_ANY)},
   };
-
-  if (bind(server_fd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) != 0) {
+  if (bind(server_socket, (struct sockaddr *)&server_addr,
+           sizeof(server_addr)) != 0) {
     printf("Bind failed: %s \n", strerror(errno));
     return 1;
   }
-
-  int connection_backlog = 5;
-  if (listen(server_fd, connection_backlog) != 0) {
+  int connection_backlog = 10;
+  if (listen(server_socket, connection_backlog) != 0) {
     printf("Listen failed: %s \n", strerror(errno));
     return 1;
   }
-
   printf("Waiting for a client to connect...\n");
-  client_addr_len = sizeof(client_addr);
-
-  pthread_t tid;
   while (1) {
-      int client_socket_fd =
-          accept(server_fd, (struct sockaddr *)&client_addr, &client_addr_len);
-      printf("Client connected\n");
-
-      if (client_socket_fd < 0) { break; }
-      char buffer[BUFFER_SIZE];
-      size_t recieved_buff = recv(client_socket_fd, buffer, sizeof(buffer) - 1, 0);
-
-      if (recieved_buff < 0) {
-          printf("Recieved Error while parsing client request Error: %s \n",
-                  strerror(errno));
-          close(server_fd);
-          close(client_socket_fd);
-          return 1;
-      }
-
-      buffer[recieved_buff] = '\0';
-
-      THREAD_ARGS *args = malloc(sizeof(THREAD_ARGS));
-      args->client_socket_fd = client_socket_fd;
-      strncpy(args->buffer, buffer, BUFFER_SIZE);
-      args->directory = argc > 1 ? argv[2] : "";
-
-      int result = pthread_create(&tid, NULL, send_response_wrapper, (void *) args);
-
-      if(result != 0) {
-          perror("Thread creation failed");
-          free(args);
-          exit(EXIT_FAILURE);
-      }
-
-      pthread_detach(tid);
-      
+    client_addr_len = sizeof(client_addr);
+    intptr_t client_socket =
+        accept(server_socket, (struct sockaddr *)&client_addr,
+               (unsigned int *)&client_addr_len);
+    if (client_socket < 0) {
+      break;
+    }
+    pthread_create(&tid, NULL, http_handler, (void *)client_socket);
+    pthread_detach(tid);
+    printf("Client connected\n");
   }
-  close(server_fd);
-
+  close(server_socket);
   return 0;
 }
-
-void *send_response_wrapper(void *arg){
-    THREAD_ARGS *args = (THREAD_ARGS *)arg; 
-    int client_socket_fd = args->client_socket_fd;
-    char* buffer = args->buffer;
-    char *directory = args->directory;
-
-    printf("Directory is %s\n", directory);
-
-    char *res = send_response(buffer, directory);
-    send(client_socket_fd, res, strlen(res), 0);
-
-    free(args);
-
-    close(client_socket_fd);
-
+int compressToGzip(const char *input, int inputSize, char *output,
+                   int outputSize) {
+  z_stream zs = {0};
+  zs.zalloc = Z_NULL;
+  zs.zfree = Z_NULL;
+  zs.opaque = Z_NULL;
+  zs.avail_in = (uInt)inputSize;
+  zs.next_in = (Bytef *)input;
+  zs.avail_out = (uInt)outputSize;
+  zs.next_out = (Bytef *)output;
+  deflateInit2(&zs, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8,
+               Z_DEFAULT_STRATEGY);
+  int ret = deflate(&zs, Z_FINISH);
+  deflateEnd(&zs);
+  if (ret != Z_STREAM_END) {
+    fprintf(stderr, "Compression failed\n");
+    return -1;
+  }
+  return zs.total_out;
 }
-char *copy_str(char str[]){
-    size_t len = strlen(str);
-    char *copy_arr = malloc(len + 1);
-
-    if (copy_arr == NULL) {
-        perror("Failed to allocate memory");
-        exit(EXIT_FAILURE);
-    }
-
-    strcpy(copy_arr, str);
-    return copy_arr;
-}
-
-char *response(char *request_target) {
-    printf("what is my request target? %s\n", request_target);
-  if (strcmp(request_target, "/") == 0) {
-    return "HTTP/1.1 200 OK\r\n\r\n";
-  }
-  else {
-    return "HTTP/1.1 404 Not Found\r\n\r\n";
-  }
-}
-
-char *send_response(char buffer[], char* directory){
-    char *buffer_cpy = copy_str(buffer);
-    const char *user_agent = "/user-agent";
-
-    char *request_line = strtok(buffer, "\r\n");
-    char *host_line = strtok(NULL, "\r\n");
-    char *user_agent_line = (host_line != NULL) ? strtok(NULL, "\r\n") : NULL;
-
-    char *request_target = strtok(request_line, " ");
-    request_target = strtok(NULL, " ");
-
-    if(strcmp(request_target, user_agent) != 0) { return echo_response(buffer_cpy, directory); } 
-
-    char *user_agents = strtok(user_agent_line, ": ");
-    user_agents = strtok(NULL, ": ");
-
-    return html_content(user_agents, "text/plain", "other");
-
-    
-}
-char *echo_response(char *buff, char* directory) {
-
-  char *request_buffer = copy_str(buff);
-  char **split_buff = split_tokens(buff);
-  const char *slash = "/";
-  const char *empty = "";
-
-  const char *echo = "echo";
-  const char *file = "files";
-  const char *gzip = "gzip";
-
-  const char *http_get = "GET";
-  const char *http_post = "POST";
-
-  if (strcmp(split_buff[1], slash) == 0)
-    return response(split_buff[1]);
-
-  char *word = strtok(split_buff[1], "/");
-  char *word_command =  malloc(strlen(word) + 1);
-  strncpy(word_command, word, strlen(word));
-
-  if (strcmp(word, echo) != 0 && strcmp(word, file) != 0) {
-    return response(word);
-  }
-
-  word = strtok(NULL, "\0");
-  if (word == NULL) {
-    return response("/Not Found");
-  }
-
-  int result = strcmp(word_command, file);
-  if(strcmp(directory, empty) != 0) {
-
-      size_t length = strlen(directory) + strlen(word) + 1;
-      char *file_path = malloc(length);
-      strcpy(file_path, directory);
-      strcat(file_path, word);
-
-      if(strcmp(http_get, split_buff[0]) == 0) {
-          return get_file(file_path);
-      }
-      
-      char *body_buff = strtok(request_buffer, "\r\n");
-      body_buff = strtok(NULL, "\r\n");
-      printf("This is the body buffer %s\n", body_buff);
-      body_buff = strtok(NULL, "\r\n");
-      printf("This is the body buffer %s\n", body_buff);
-      body_buff = strtok(NULL, "\r\n");
-      printf("This is the body buffer %s\n", body_buff);
-
-      return post_file(file_path, body_buff);
-
-      
-  }
-
-  char *encoding = strtok(request_buffer, "\r\n"); 
-  encoding = strtok(NULL, "\r\n");
-
-  encoding = strtok(NULL, ": ");
-  encoding = strtok(NULL, "\0");
-
-  if (encoding == NULL || strstr(encoding, gzip) == NULL) {
-    encoding = "other";
-  }
-    
-  return html_content(word, "text/plain", encoding);
-}
-
-char *html_content(char *message, char* content_type, char* encoding){
-    const char *gzip = "gzip";
-    char *encoder = (strstr(encoding,gzip) != NULL) ? "Content-Encoding: gzip\r\n": "";
-    int content_length = strlen(message);
-  int buffer_size = snprintf(NULL, 0,
-                             "HTTP/1.1 200 OK\r\n"
-                             "%sContent-Type: "
-                             "%s\r\nContent-Length: %d\r\n\r\n%s",
-                             encoder,content_type, content_length, message);
-
-  char *buffer = malloc(buffer_size + 1);
-  sprintf(buffer,
-          "HTTP/1.1 200 OK\r\n"
-          "%sContent-Type: %s\r\n"
-          "Content-Length: %d\r\n\r\n%s",
-          encoder,content_type, content_length, message);
-
-  return buffer;
-}
-char **split_tokens(char *buff) {
-  char *request_target;
-  const char delim[] = "\r\n";
-  request_target = strtok(buff, delim);
-  int index = 0;
-  for (int i = 0; request_target[i] != '\0'; i++) {
-    if (request_target[i] == ' ') {
-      index++;
-    }
-  }
-  index++;
-
-  if (index < 3) {
+void *http_handler(void *args) {
+  intptr_t client_socket = (intptr_t)args;
+  char buffer[1024];
+  ssize_t bytes_read = read(client_socket, buffer, sizeof(buffer) - 1);
+  if (bytes_read <= 0) {
+    close(client_socket);
     return NULL;
   }
-  char **buff_arr = malloc((index + 1) * sizeof(char *));
-
-  char *token = strtok(request_target, " ");
-  for (int i = 0; i < index; i++) {
-    buff_arr[i] = malloc(strlen(token) + 1);
-    strcpy(buff_arr[i], token);
-    token = strtok(NULL, " ");
-  }
-
-  return buff_arr;
-}
-
-char *get_file(char* file_path) {
-    FILE *fh_input;
-    fh_input = fopen(file_path, "r");
-
-    if(fh_input == NULL) { return response("/Not Found");}
-
-    char file_buffer[BUFFER_SIZE];
-    fgets(file_buffer, BUFFER_SIZE, fh_input);
-
-    fclose(fh_input);
-
-    return html_content(file_buffer, "application/octet-stream", "other");
-}
-
-char *post_file(char *file_path, char* buffer_contents) {
-    FILE *fh_output;
-    fh_output = fopen(file_path, "w");
-
-    if(fh_output == NULL) {
-        perror("Cannot open file");
-        return NULL;
+  buffer[bytes_read] = '\0';
+  printf("request data: \n%s\r\n", buffer);
+  char *method = strtok(buffer, " ");
+  char *path = strtok(NULL, " ");
+  char *request_line = strtok(NULL, "\r\n");
+  
+  char *host = NULL;
+  char *accept = NULL;
+  char *user_agent = NULL;
+  char *request_body = NULL;
+  char *accept_encoding = NULL;
+  // Parse the headers
+  char *header_line = strtok(NULL, "\r\n");
+  while (header_line != NULL && strlen(header_line) > 0) {
+    if (strncmp(header_line, "Host: ", 6) == 0) {
+      host = header_line;
+    } else if (strncmp(header_line, "Accept: ", 8) == 0) {
+      accept = header_line;
+    } else if (strncmp(header_line, "User-Agent: ", 12) == 0) {
+      user_agent = header_line;
+    } else if (strncmp(header_line, "Accept-Encoding: ", 17) == 0) {
+      accept_encoding = header_line + 17;
+    } else {
+      request_body = header_line;
     }
-    fprintf(fh_output, "%s", buffer_contents);
-    fclose(fh_output);
+    header_line = strtok(NULL, "\r\n");
+  }
+  char ok[] = "HTTP/1.1 200 OK\r\n\r\n";
+  char not_found[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
+  char response[1024];
+  if (strncmp(path, "/files/", 7) == 0 && directory != NULL) {
+    FILE *file;
+    long file_size;
+    char *filename = path + 7;
+    char *full_path = malloc(strlen(directory) + strlen(filename) + 1);
+    strcpy(full_path, directory);
+    strcat(full_path, filename);
+    full_path[strlen(directory) + strlen(filename)] = '\0';
+    if (strncmp(method, "POST", 4) == 0) {
+      if ((file = fopen(full_path, "w"))) {
+        fputs(request_body, file);
+        fseek(file, 0, SEEK_END);
+        file_size = ftell(file);
+        fclose(file);
+        sprintf(response,
+                "HTTP/1.1 201 Created\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                "Content-Length: %ld\r\n\r\n%s",
+                file_size, request_body);
+        printf("response data: %s\n", response);
+        send(client_socket, response, strlen(response), 0);
+      } else {
+        strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
+        send(client_socket, response, strlen(response), 0);
+      }
+      free(full_path);
+      close(client_socket);
+      return NULL;
+    }
+    if ((file = fopen(full_path, "r"))) {
+  fseek(file, 0, SEEK_END);
+      file_size = ftell(file);
+      fseek(file, 0, SEEK_SET);
+      char *content = malloc(file_size + 1);
+      fread(content, file_size, 1, file);
+      fclose(file);
+      content[file_size] = '\0';
+      sprintf(response,
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: application/octet-stream\r\n"
+              "Content-Length: %ld\r\n\r\n%s",              
+              file_size, content);
 
-    return "HTTP/1.1 201 Created\r\n\r\n";
-
+      printf("response data: %s", response);
+      send(client_socket, response, strlen(response), 0);
+      free(content);
+    } else {
+      puts("couldn't open the file");
+      strcpy(response, "HTTP/1.1 404 Not Found\r\n\r\n");
+      send(client_socket, response, strlen(response), 0);
+    }
+    free(full_path);
+    close(client_socket);
+    return NULL;
+  }
+  if (strncmp(path, "/echo/", 6) == 0) {
+    char *content = path + 6;
+    size_t content_length = strlen(content);
+    int gzip = 0;
+    if (accept_encoding != NULL) {
+      char *token = strtok(accept_encoding, ", ");
+      while (token != NULL) {
+        if (strcmp(token, "gzip") == 0) {
+          gzip = 1;
+          break;
+        }
+        token = strtok(NULL, ", ");
+      }
+    }
+    if (gzip) {
+      char compressed[1024];
+      content_length = compressToGzip(content, content_length, compressed,
+                                      sizeof(compressed));
+      if (content_length > 0) {
+        sprintf(response,
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Encoding: gzip\r\n"
+                "Content-Type: text/plain\r\n"
+                "Content-Length: %zu\r\n\r\n",
+                content_length);
+        printf("response data: %s\n", response);
+        printf("compressed data: %s\n", compressed);
+        send(client_socket, response, strlen(response), 0);
+        send(client_socket, compressed, content_length, 0);
+      } else {
+        strcpy(response, "HTTP/1.1 500 Internal Server Error\r\n\r\n");
+        send(client_socket, response, strlen(response), 0);
+      }
+    } else {
+      sprintf(response,
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: text/plain\r\n"
+              "Content-Length: %zu\r\n\r\n%s",
+              content_length, content);
+      send(client_socket, response, strlen(response), 0);
+    }
+    close(client_socket);
+    return NULL;
+  }
+  if (strncmp(path, "/user-agent", 11) == 0) {
+    char *content = user_agent + 12;
+    size_t content_length = strlen(content);
+    sprintf(response,
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: %zu\r\n\r\n%s",
+            content_length, content);
+    send(client_socket, response, strlen(response), 0);
+    close(client_socket);
+    return NULL;
+  }
+  if (strcmp(path, "/") == 0) {
+    printf("200 OK\n");
+    send(client_socket, ok, strlen(ok), 0);
+  } else {
+    printf("404 not found\n");
+    send(client_socket, not_found, strlen(not_found), 0);
+  }
+  close(client_socket);
+  return NULL;
 }
